@@ -8,6 +8,9 @@
 #include <sstream>
 #include "imageloader.h"
 #include <GL/glut.h>
+int start=1;
+void drawGameStartScene();
+int instr=0;
 using namespace std;
 #define PI 3.141592653589
 #define DEG2RAD(deg) (deg * PI / 180)
@@ -243,11 +246,64 @@ int main(int argc, char **argv) {
 	return 0;
 }
 // Function to draw objects on the screen
+void drawGameStartScene() {
+	
+	glPushMatrix();
+	glLineWidth(2.0f);
+	GLuint _textureId3;
+
+
+	glTranslatef(0.0f, 0.0f, -5.0f);
+	if(instr==0)
+	{
+	Image* image = loadBMP("front.bmp");
+			_textureId3 = loadTexture(image);
+			delete image;
+		}
+		else
+		{
+	Image* image = loadBMP("instr.bmp");
+			_textureId3 = loadTexture(image);
+			delete image;
+		}
+
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, _textureId3);
+	
+	//Bottom
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glColor4f(1.0f, 1.0f, 1.0f,1.0f);
+	
+	glBegin(GL_QUADS);
+	
+	glNormal3f(0.0, 0.0f, 1.0f);
+	glTexCoord2f(0.0f, 0.0f);
+	glVertex3f(-2.9f, -2, 0.0f);
+	glTexCoord2f(1.0f, 0.0f);
+	glVertex3f(2.9f, -2, 0.0f);
+	glTexCoord2f(1.0f, 1.0f);
+	glVertex3f(2.9f, 2, 0.0f);
+	glTexCoord2f(0.0f, 1.0f);
+	glVertex3f(-2.9f, 2, 0.0f);
+	
+	glEnd();
+	glDisable(GL_TEXTURE_2D);
+
+
+	glPopMatrix();
+	glutSwapBuffers();
+}
 void drawScene() {
 	timeSinceStart = glutGet(GLUT_ELAPSED_TIME);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
+	if(start)
+	{
+		drawGameStartScene();
+		return;
+	}
 	glPushMatrix();
 	glLineWidth(2.0f);
 
@@ -1079,12 +1135,27 @@ void drawString(string a,float x,float y)
 
 		void handleMouseclick(int button, int state, int x, int y) {
 
-			/*  if (state == GLUT_DOWN)
+			if(start==1)
+			{
+			  if (state == GLUT_DOWN)
 			    {
 			    if (button == GLUT_LEFT_BUTTON)
-			    theta += 15;
+			    start=0;
 			    else if (button == GLUT_RIGHT_BUTTON)
-			    theta -= 15;
+			    instr=1;
 			    }
-			 */
+			}
+			if(instr==1)
+			{
+				if (state == GLUT_DOWN)
+			    {
+			    if (button == GLUT_LEFT_BUTTON)
+			    {
+			    	start=1;
+			    	instr=0;
+			    }
+			    }
+
+			}
+			 
 		}
