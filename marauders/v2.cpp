@@ -1,0 +1,1090 @@
+#include <iostream>
+#include <utility> 
+#include<cstring>
+#include <cstdlib>
+#include <AL/alut.h>
+#include <string>
+#include <cmath>
+#include <sstream>
+#include "imageloader.h"
+#include <GL/glut.h>
+using namespace std;
+#define PI 3.141592653589
+#define DEG2RAD(deg) (deg * PI / 180)
+// structures
+struct Spider {
+	float x, y , vel_x, vel_y;
+	int deleted_flag;
+	char color;
+};
+struct Pos {
+	float x, y ;
+	int selected;
+};
+struct Laser {
+	float x ;
+	float y ;
+	int deleted;
+	float theta;
+};
+
+
+
+// Function Declarations
+void drawScene();
+void drawGameOverScene();
+void drawAntonymScene();
+void drawWonScene();
+void drawString(string a,float x,float y);
+
+void update(int value);
+void drawBox(float len, float width);
+void drawBase(float len,float width);
+void drawRedBasket(float rad);
+void drawGreenBasket(float rad);
+void drawCanon(float len);
+void drawLaser(float len);
+void drawSpider(float len);
+void drawBall1(float rad);
+void drawBall2(float rad);
+void initRendering();
+void handleResize(int w, int h);
+void handleKeypress1(unsigned char key, int x, int y);
+void handleKeypress2(int key, int x, int y);
+void handleMouseclick(int button, int state, int x, int y);
+
+// Global Variables
+float box_len = 4.0f;
+float box_width = 6.0f;
+int score = 0;
+int gameover = 0;  //game not over
+pair<string,string> synonyms[100];
+int failflag = 0;  //game not over
+int wonflag = 0;
+
+float canon_x ;
+float canon_y ;
+float spider_velx = 0.0f;
+float spider_vely_min = 0.02f;
+float spider_vely_max = 0.1f;
+float theta = 0.0f; 
+int fire_flag = 0;
+int oldTimeSinceStart = 0;
+int canon_selected_flag = 0;
+int num_of_spiders;
+Spider spiders[100];
+Pos position[20];
+Laser laser[1000];
+int prev_fire = 0 , fire = 0,i;
+int syn_selected;
+ALuint fireBuffer, fireSource;
+ALuint failBuffer, failSource;
+ALuint caughtBuffer, caughtSource;
+ALuint shotBuffer, shotSource;
+ALuint winBuffer, winSource;
+int lives = 3;
+int regainmode = 0;
+int regained = 0;
+int timeSinceStart; 
+void fired(){
+	fireBuffer = alutCreateBufferFromFile ("fire.wav");
+	alGenSources (1, &fireSource);
+	alSourcei (fireSource, AL_BUFFER, fireBuffer);
+	alSourcePlay (fireSource);
+}  
+void fail(){
+	failBuffer = alutCreateBufferFromFile ("Sad_Trombone-Joe_Lamb-665429450.wav");
+	alGenSources (1, &failSource);
+	alSourcei (failSource, AL_BUFFER, failBuffer);
+	alSourcePlay (failSource);
+	alutSleep (4);
+	failflag = 1;
+}
+void caught(){
+	caughtBuffer = alutCreateBufferFromFile ("caught.wav");
+	alGenSources (1, &caughtSource);
+	alSourcei (caughtSource, AL_BUFFER, caughtBuffer);
+	alSourcePlay (caughtSource);
+}
+void shot(){
+	shotBuffer = alutCreateBufferFromFile ("shot.wav");
+	alGenSources (1, &shotSource);
+	alSourcei (shotSource, AL_BUFFER, shotBuffer);
+	alSourcePlay (shotSource);
+}
+void win(){
+	winBuffer = alutCreateBufferFromFile ("applause-01.wav");
+	alGenSources (1, &winSource);
+	alSourcei (winSource, AL_BUFFER, winBuffer);
+	alSourcePlay (winSource);
+	alutSleep (4);
+	wonflag = 1;
+}
+//Makes the image into a texture, and returns the id of the texture
+GLuint loadTexture(Image* image) {
+	GLuint textureId;
+	glGenTextures(1, &textureId); //Make room for our texture
+	glBindTexture(GL_TEXTURE_2D, textureId); //Tell OpenGL which texture to edit
+	//Map the image to the texture
+	glTexImage2D(GL_TEXTURE_2D,                //Always GL_TEXTURE_2D
+				 0,                            //0 for now
+				 GL_RGB,                       //Format OpenGL uses for image
+				 image->width, image->height,  //Width and height
+				 0,                            //The border of the image
+				 GL_RGB, //GL_RGB, because pixels are stored in RGB format
+				 GL_UNSIGNED_BYTE, //GL_UNSIGNED_BYTE, because pixels are stored
+				                   //as unsigned numbers
+				 image->pixels);               //The actual pixel data
+	return textureId; //Returns the id of the texture
+}
+
+GLuint _textureId,_textureId1,_textureIdc1; //The id of the texture
+
+
+int main(int argc, char **argv) {
+	gameover = 0;
+	system("xmms2 play");
+	alutInit (&argc, argv);
+	synonyms[0]=make_pair("hot","warm");
+	synonyms[1]=make_pair("opposite","different");
+	synonyms[2]=make_pair("tidy","clean");
+	synonyms[3]=make_pair("cry","weep");
+	synonyms[4]=make_pair("icy","cold");
+	synonyms[5]=make_pair("alike","same");
+	synonyms[6]=make_pair("dirty","untidy");
+	synonyms[7]=make_pair("giggle","laugh");
+	srand(time(NULL));
+	lives = 3;
+//	char buffer[100];
+	syn_selected = rand()%8;
+	box_len = 4.0f;
+	box_width = 5.0f;
+	num_of_spiders = 8;
+	//Initialize position of baskets and canon
+	canon_x = 0.0f;
+	canon_y = -box_len*0.45;
+	int i = 0;
+	for (i = 0 ; i < 11 ; i++)
+	{
+		if (i<6)
+		{
+			position[i].x = (box_width/2)*(1-(float)(i+1)/6);
+			position[i].y = 0.43*box_len;
+		}
+		else
+		{
+			position[i].x = (box_width/2)*(1-(float)(i+1)/6);
+			position[i].y = 0.43*box_len - 0.1*box_width;
+		}
+		position[i].selected = 0 ;
+	}
+
+	int block;
+	//Initialize randomly the position of spiders
+	for (i = 1 ; i <= num_of_spiders ; i++)
+	{
+		block = rand()%11;
+		while(position[block].selected != 0)
+			block = rand()%11;
+		position[block].selected = 1 ; 
+		spiders[i].x = position[block].x;
+		spiders[i].y = position[block].y;
+		spiders[i].deleted_flag = 0;
+		spiders[i].vel_x = -1*(spider_vely_min + (rand()%500*(spider_vely_max-spider_vely_min))/500) ;
+		spiders[i].vel_y = -1*(spider_vely_min + (rand()%500*(spider_vely_max-spider_vely_min))/500) ;
+		if(i <= num_of_spiders/3)
+		{
+			spiders[i].color = 'r';
+		}
+		else if(i > num_of_spiders/3 && i<= 2*num_of_spiders/3)
+		{
+			spiders[i].color = 'g';
+		}
+		else
+		{
+			spiders[i].color = 'b';
+		}
+	}
+
+	// Initialize GLUT
+	glutInit(&argc, argv);
+	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
+
+	int w = glutGet(GLUT_SCREEN_WIDTH);
+	int h = glutGet(GLUT_SCREEN_HEIGHT);
+	int windowWidth = w * 4 / 5;
+	int windowHeight = h * 4 / 5;
+
+	glutInitWindowSize(windowWidth, windowHeight);
+	glutInitWindowPosition((w - windowWidth) / 2, (h - windowHeight) / 2);
+
+	glutCreateWindow("Arachnophobia");  // Setup the window
+	initRendering();
+
+	// Register callbacks
+	glutDisplayFunc(drawScene);
+	if(gameover)
+	{
+		glutIdleFunc(drawGameOverScene);
+	}
+	else
+		glutIdleFunc(drawScene);
+
+	glutDisplayFunc(drawScene);
+	glutKeyboardFunc(handleKeypress1);
+	glutSpecialFunc(handleKeypress2);
+	glutMouseFunc(handleMouseclick);
+	glutReshapeFunc(handleResize);
+	glutTimerFunc(10, update, 0);
+
+	glutMainLoop();
+	alutExit (); 
+	system("xmms2 stop");
+	return 0;
+}
+// Function to draw objects on the screen
+void drawScene() {
+	timeSinceStart = glutGet(GLUT_ELAPSED_TIME);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	glPushMatrix();
+	glLineWidth(2.0f);
+
+	// Draw Main World Boundaries
+	glTranslatef(0.8f, 0.0f, -5.0f);
+	
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, _textureId);
+	
+	//Bottom
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glColor4f(1.0f, 1.0f, 1.0f,1.0f);
+	
+	glBegin(GL_QUADS);
+	
+	glNormal3f(0.0, 0.0f, 1.0f);
+	glTexCoord2f(0.0f, 0.0f);
+	glVertex3f(-2.5f, -2, 0.0f);
+	glTexCoord2f(1.0f, 0.0f);
+	glVertex3f(2.5f, -2, 0.0f);
+	glTexCoord2f(1.0f, 1.0f);
+	glVertex3f(2.5f, 2, 0.0f);
+	glTexCoord2f(0.0f, 1.0f);
+	glVertex3f(-2.5f, 2, 0.0f);
+	
+	glEnd();
+	glDisable(GL_TEXTURE_2D);
+
+	
+	
+	
+	//Draw base
+	drawBase(box_len,box_width);
+	//display score
+			Image* image = loadBMP("owl.bmp");
+			_textureId1 = loadTexture(image);
+			delete image;
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, _textureId1);
+	
+	//Bottom
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glColor4f(1.0f, 1.0f, 1.0f,1.0f);
+	
+	glBegin(GL_QUADS);
+	
+	glNormal3f(0.0, 0.0f, 1.0f);
+	glTexCoord2f(0.0f, 0.0f);
+	glVertex3f(-2.55f, 2, 0.0f);
+	glTexCoord2f(1.0f, 0.0f);
+	glVertex3f(-2.55f, -2, 0.0f);
+	glTexCoord2f(1.0f, 1.0f);
+	glVertex3f(-4.05f, -2, 0.0f);
+	glTexCoord2f(0.0f, 1.0f);
+	glVertex3f(-4.05f, 2, 0.0f);
+	
+	glEnd();
+
+	string result;
+	ostringstream convert;
+	convert << (float)timeSinceStart/1000 ;
+	result = convert.str();
+	glColor4f(0.0f, 0.0f, 0.0f, 0.0f);
+	drawString("Score Board : ",-3.7,1.5);
+	drawString("Time Elapsed : ",-4.0,1.0);
+	drawString(result,-3.2,1.0);
+	drawString(" sec",-2.8,1.0);
+	if(regainmode == 1)
+	{
+		if(timeSinceStart%2 == 0)
+			glColor4f(0.0f, 0.0f, 0.0f, 0.0f);
+		else
+			glColor4f(1.0f, 0.0f, 0.0f, 0.0f);
+		drawString("Find Antonym Of : ",-3.7,0.5);
+	}
+	else
+		drawString("Find Synonym Of : ",-3.7,0.5);
+	drawString(synonyms[syn_selected].first,-3.5,0.3);
+	ostringstream convert1;
+	convert1 << score ;
+	result = convert1.str();
+	drawString("Score : ",-4.0,0.1);
+	drawString(result,-3.2,0.1);
+	ostringstream convert2;
+	convert2 << lives ;
+	result = convert2.str();
+	drawString("Lives : ",-4.0,-0.1);
+	drawString(result,-3.2,-0.1);
+	glDisable(GL_TEXTURE_2D);
+	// Draw Cannon
+	glPushMatrix();
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	glTranslatef(canon_x,canon_y, 0.0f);	//baad me change this into a variable
+	glRotatef(theta, 0.0f, 0.0f, 1.0f);
+		//Draw Highlighted Canon
+		if(timeSinceStart%2 == 0)
+			glColor3f(1.0f, 1.0f, 1.0f);
+		else
+			glColor3f(1.0f, 1.0f, 0.0f);
+	drawCanon(0.05*box_len);
+	glPopMatrix();
+
+	//Draw laser jet
+	int i;
+	for(i = 0; i< fire; i++)
+	{
+		if(laser[i].deleted == 0)
+		{
+		glPushMatrix();
+		glLineWidth(3.0f);
+		glTranslatef(laser[i].x,laser[i].y, 0.0f);	//baad me change this into a variable
+		glRotatef(laser[i].theta, 0.0f, 0.0f, 1.0f);
+		glColor3f(1.0f, 0.5f, 0.0f);
+		drawLaser(0.1*box_len);
+		glPopMatrix();
+		}
+	}
+		glLineWidth(2.0f);
+
+	// Spiders
+
+	for (i = 1 ; i <= num_of_spiders ; i++)
+	{
+		if(spiders[i].deleted_flag == 0)
+		{
+			glPushMatrix();
+			if(regainmode == 1)
+			{
+				if(timeSinceStart%2 == 0)
+					glColor3f(1.0f, 0.0f, 0.0f);
+				else
+				glColor3f(0.0f, 0.0f, 1.0f);
+			}
+			else
+			{
+				if(i <= num_of_spiders/3)
+					glColor3f(1.0f, 0.0f, 0.0f);
+				else if(i > num_of_spiders/3 && i<= 2*num_of_spiders/3)
+					glColor3f( 0.8f,0.0f,1.0f);
+				else
+					glColor3f(0.0f, 0.0f, 0.0f);
+			}
+			drawString(synonyms[i-1].second,spiders[i].x,spiders[i].y);
+			glPopMatrix();
+		}
+	}
+
+	glPopMatrix();
+	glutSwapBuffers();
+}
+
+/*
+void drawAntonymScene() {
+	timeSinceStart = glutGet(GLUT_ELAPSED_TIME);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	glPushMatrix();
+	glLineWidth(2.0f);
+
+	// Draw Main World Boundaries
+	glTranslatef(0.8f, 0.0f, -5.0f);
+	glColor3f(0.0f, 0.0f, 1.0f);	//white
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	drawBox(box_len,box_width);
+
+	//Draw base
+	drawBase(box_len,box_width);
+	//display score
+	string result;
+	ostringstream convert;
+	convert << (float)timeSinceStart/1000 ;
+	result = convert.str();
+	drawString("Score Board : ",-3.7,1.5);
+	drawString("Time Elapsed : ",-4.0,1.0);
+	drawString(result,-3.2,1.0);
+	drawString(" sec",-2.8,1.0);
+	if(timeSinceStart%2 == 0)
+		glColor4f(0.0f, 0.0f, 0.0f,0.0f);
+	else
+		glColor4f(0.0f, 0.0f, 1.0f,0.0f);
+	drawString("Find Antonym Of : ",-3.7,0.5);
+	drawString(synonyms[syn_selected].first,-3.5,0.3);
+	ostringstream convert1;
+	convert1 << score ;
+	result = convert1.str();
+	drawString("Score : ",-4.0,0.1);
+	drawString(result,-3.2,0.1);
+	ostringstream convert2;
+	convert2 << lives ;
+	result = convert2.str();
+	drawString("Lives : ",-4.0,-0.1);
+	drawString(result,-3.2,-0.1);
+	// Draw Cannon
+	glPushMatrix();
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	glTranslatef(canon_x,canon_y, 0.0f);	//baad me change this into a variable
+	glRotatef(theta, 0.0f, 0.0f, 1.0f);
+		//Draw Highlighted Canon
+		if(timeSinceStart%2 == 0)
+			glColor3f(1.0f, 1.0f, 1.0f);
+		else
+			glColor3f(1.0f, 1.0f, 0.0f);
+	drawCanon(0.05*box_len);
+	glPopMatrix();
+
+	//Draw laser jet
+	int i;
+	for(i = 0; i< fire; i++)
+	{
+		if(laser[i].deleted == 0)
+		{
+		glPushMatrix();
+		glLineWidth(3.0f);
+		glTranslatef(laser[i].x,laser[i].y, 0.0f);	//baad me change this into a variable
+		glRotatef(laser[i].theta, 0.0f, 0.0f, 1.0f);
+		glColor3f(0.5f, 1.0f, 0.0f);
+		drawLaser(0.1*box_len);
+		glPopMatrix();
+		}
+	}
+		glLineWidth(2.0f);
+
+	// Spiders
+
+	for (i = 1 ; i <= num_of_spiders ; i++)
+	{
+		if(spiders[i].deleted_flag == 0)
+		{
+			glPushMatrix();
+			if(timeSinceStart%2 == 0)
+				glColor3f(1.0f, 0.0f, 0.0f);
+			else
+				glColor3f(1.0f, 1.0f, 0.0f);
+			drawString(synonyms[i-1].second,spiders[i].x,spiders[i].y);
+			glPopMatrix();
+		}
+	}
+
+
+	glPopMatrix();
+	glutSwapBuffers();
+}
+*/
+void drawGameOverScene()
+{
+	if(failflag == 1)
+	{
+	system("xmms2 stop");
+		exit(0);
+	}
+
+
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	glPushMatrix();
+	glLineWidth(2.0f);
+
+	// Draw Main World Boundaries
+	glTranslatef(0.0f, 0.0f, -5.0f);
+	
+			Image* image = loadBMP("sad.bmp");
+			_textureIdc1 = loadTexture(image);
+			delete image;
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, _textureIdc1);
+	
+	//Bottom
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glColor4f(1.0f, 1.0f, 1.0f,1.0f);
+	
+	glBegin(GL_QUADS);
+	
+	glNormal3f(0.0, 0.0f, 1.0f);
+	glTexCoord2f(0.0f, 0.0f);
+	glVertex3f(-1.0f, 2.0f, 0.0f);
+	glTexCoord2f(1.0f, 0.0f);
+	glVertex3f(-1.0f, 0.0f, 0.0f);
+	glTexCoord2f(1.0f, 1.0f);
+	glVertex3f(1.0f, 0.0f, 0.0f);
+	glTexCoord2f(0.0f, 1.0f);
+	glVertex3f(1.0f, 2.0f, 0.0f);
+	
+	glEnd();
+	glDisable(GL_TEXTURE_2D);
+
+
+
+	//display score
+	string result;
+	ostringstream convert;
+	convert << (float)timeSinceStart/1000 ;
+	result = convert.str();
+		glColor4f(1.0f, 1.0f, 1.0f,1.0f);
+	drawString("GAME OVER !! ",-0.5,-0.3);
+		glColor4f(1.0f, 1.0f, 1.0f,1.0f);
+	drawString("Time Elapsed : ",-0.7,-0.5);
+		glColor4f(1.0f, 1.0f, 1.0f,1.0f);
+	drawString(result,0.2,-0.5);
+		glColor4f(1.0f, 1.0f, 1.0f,1.0f);
+	drawString(" sec",0.55,-0.5);
+		glColor4f(1.0f, 1.0f, 1.0f,1.0f);
+	drawString("Word : ",-0.7,-0.7);
+		glColor4f(1.0f, 1.0f, 1.0f,1.0f);
+	drawString(synonyms[syn_selected].first,0.0,-0.7);
+		glColor4f(1.0f, 1.0f, 1.0f,1.0f);
+	drawString("Synonym : ",-0.7,-0.9);
+		glColor4f(1.0f, 1.0f, 1.0f,1.0f);
+	drawString(synonyms[syn_selected].second,0.0,-0.9);
+
+	glPopMatrix();
+	glutSwapBuffers();
+	fail();
+}
+void drawWonScene()
+{
+	if(wonflag == 1)
+	{
+	system("xmms2 stop");
+		exit(0);
+	}
+
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	glPushMatrix();
+	glLineWidth(2.0f);
+
+	// Draw Main World Boundaries
+	glTranslatef(0.0f, 0.0f, -5.0f);
+	
+			Image* image = loadBMP("con1.bmp");
+			_textureIdc1 = loadTexture(image);
+			delete image;
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, _textureIdc1);
+	
+	//Bottom
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glColor4f(1.0f, 1.0f, 1.0f,1.0f);
+	
+	glBegin(GL_QUADS);
+	
+	glNormal3f(0.0, 0.0f, 1.0f);
+	glTexCoord2f(0.0f, 0.0f);
+	glVertex3f(-2.0f, 1.75f, 0.0f);
+	glTexCoord2f(1.0f, 0.0f);
+	glVertex3f(-2.0f, -1.75f, 0.0f);
+	glTexCoord2f(1.0f, 1.0f);
+	glVertex3f(2.0f, -1.75f, 0.0f);
+	glTexCoord2f(0.0f, 1.0f);
+	glVertex3f(2.0f, 1.75f, 0.0f);
+	
+	glEnd();
+	glDisable(GL_TEXTURE_2D);
+
+
+
+	//display score
+	string result;
+	ostringstream convert;
+	convert << (float)timeSinceStart/1000 ;
+	result = convert.str();
+		glColor4f(0.0f, 0.0f, 0.0f,1.0f);
+	drawString("YOU WON !!!",-0.3,-0.3);
+	drawString("Time Elapsed : ",-0.7,-0.5);
+	drawString(result,0.2,-0.5);
+	drawString(" sec",0.55,-0.5);
+	drawString("Word : ",-0.7,-0.7);
+	drawString(synonyms[syn_selected].first,0.0,-0.7);
+	drawString("Synonym : ",-0.7,-0.9);
+	drawString(synonyms[syn_selected].second,0.0,-0.9);
+	ostringstream convert1;
+	convert1 << score ;
+	result = convert1.str();
+	drawString("Score : ",-0.7,-1.1);
+	drawString(result,0.0,-1.1);
+
+	glPopMatrix();
+	glutSwapBuffers();
+	win();
+}
+
+	// Function to handle all calculations in the scene
+	// updated evry 10 milliseconds
+	void update(int value) {
+		if(lives <= 0)
+		{
+			gameover = 1;
+			glutIdleFunc(drawGameOverScene);
+			usleep(5000);
+		}
+		if(lives == 1 && regained == 0)
+		{
+			regainmode = 1;
+			regained = 1;
+			spiders[(syn_selected+4)%8 + 1].deleted_flag = 0;
+		}
+
+		// Update position of spider
+
+		int i = 0,j,alldel = 0;
+		for (i = 1 ; i <= num_of_spiders ; i++)
+		{
+			if(spiders[i].vel_y!=0 && spiders[i].deleted_flag == 0)
+			{
+				if(spiders[i].x  > box_width/2 - 0.5 || spiders[i].x  < -box_width/2 + 0.05)
+				   spiders[i].vel_x *= -1;
+				if(spiders[i].y  > box_len/2 - 0.1|| spiders[i].y  < -box_len/2 + 0.05)
+				   spiders[i].vel_y *= -1;
+				for(int k = 1; k<=num_of_spiders; k++)
+				{
+					if(k!=i && (spiders[i].x-spiders[k].x)*(spiders[i].x-spiders[k].x) + (spiders[i].y-spiders[k].y)*(spiders[i].y-spiders[k].y) <= 0.01 )
+					{
+						spiders[i].vel_x *= -1; 
+						spiders[i].vel_y *= -1; 
+						spiders[k].vel_x *= -1; 
+						spiders[k].vel_y *= -1; 
+					}
+				}
+
+
+				alldel = 1;
+				spiders[i].y +=0.1* spiders[i].vel_y;
+				spiders[i].x +=0.1* spiders[i].vel_x;
+				for (j = 0 ; j < fire ; j++)
+				{
+					if(laser[j].deleted == 0 && (spiders[i].x-laser[j].x)*(spiders[i].x-laser[j].x) <= 0.02*box_width && (spiders[i].y-laser[j].y)*(spiders[i].y-laser[j].y) <= 0.02*box_width)
+					{
+						shot();
+						spiders[i].deleted_flag = 1;
+						laser[j].deleted = 1;
+						if(regainmode == 0)
+						{
+							if(i-1 == syn_selected)
+							{
+								score += 100;
+								glutIdleFunc(drawWonScene);
+								//done
+							}
+							else
+							{
+								lives --;
+								score -=5;
+							}
+						}
+						else
+						{
+							if((syn_selected+4)%8 == i-1)
+							{
+								regainmode = 0;
+								lives ++;
+								score += 25;
+							}
+							else
+							{
+								regainmode = 0;
+								lives = 0;
+								score -= 5;
+								glutIdleFunc(drawGameOverScene);
+								usleep(5000);
+
+							}
+
+						}
+
+					}
+				}
+			}
+		}
+			if(alldel == 0)
+			{
+				//showScore();
+				glutIdleFunc(drawGameOverScene);
+			}
+		/*	red_spider_y += spider_vely_min*0.1;
+			if(red_spider_y <= box_len*0.25)
+			green_spider_y += spider_vely_min*0.1;
+			if(red_spider_y <= box_len*0.20)
+			black_spider_y += spider_vely_min*0.1;*/
+		for (i = 0 ; i < fire ; i++)
+		{
+			if(laser[i].deleted == 0 )
+			{
+			laser[i].y += (spider_vely_max)*cos(DEG2RAD(-laser[i].theta));
+			laser[i].x += (spider_vely_max)*sin(DEG2RAD(-laser[i].theta));
+			}
+		}
+		/* ball_y += ball_vely;
+		   tri_x += ball2_velx;
+		   tri_y += ball2_vely;
+		 */
+		glutTimerFunc(10, update, 0);
+		}
+
+		void drawBox(float len, float width) {
+
+	//		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+			glBegin(GL_QUADS);
+			glVertex2f(-width / 2, -len / 2);
+			glVertex2f(width / 2, -len / 2);
+			glVertex2f(width / 2, len / 2);
+			glVertex2f(-width / 2, len / 2);
+			glEnd();
+		}
+
+		void drawBase(float len,float width) {
+
+	//		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+			glBegin(GL_LINES);
+			glVertex2f(-width / 2 , -0.4*len);
+			glVertex2f(width / 2, -0.4*len);
+			glEnd();
+		}
+void drawString(string a,float x,float y)
+{
+   	glRasterPos2f(x,y);
+	glColor4f(0.0f, 0.0f, 0.0f, 1.0f);
+	for(int i=0;i<a.length();i++)
+	{
+		glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, a[i]);
+
+	}
+}
+
+		void drawRedBasket(float rad)
+		{
+			glBegin(GL_QUADS);
+			glVertex2f(-rad , -0.1);
+			glVertex2f(-0.6*rad, -1.5*rad);
+			glVertex2f(0.6*rad, -1.5*rad);
+			glVertex2f(rad, -0.1);
+			glEnd();
+			glBegin(GL_QUADS);
+			glVertex2f(-rad , -0.1);
+			glVertex2f(-rad, 0.0);
+			glVertex2f(-0.9*rad, 0);
+			glVertex2f(-0.9*rad, -0.1);
+			glEnd();
+			glBegin(GL_QUADS);
+			glVertex2f(rad , -0.1);
+			glVertex2f(rad, 0.0);
+			glVertex2f(0.9*rad, 0);
+			glVertex2f(0.9*rad, -0.1);
+			glEnd();
+
+		}
+
+		void drawGreenBasket(float rad)
+		{
+			glBegin(GL_QUADS);
+			glVertex2f(-rad , -0.1);
+			glVertex2f(-0.6*rad, -1.5*rad);
+			glVertex2f(0.6*rad, -1.5*rad);
+			glVertex2f(rad, -0.1);
+			glEnd();
+			glBegin(GL_QUADS);
+			glVertex2f(-rad , -0.1);
+			glVertex2f(-rad, 0.0);
+			glVertex2f(-0.9*rad, 0);
+			glVertex2f(-0.9*rad, -0.1);
+			glEnd();
+			glBegin(GL_QUADS);
+			glVertex2f(rad , -0.1);
+			glVertex2f(rad, 0.0);
+			glVertex2f(0.9*rad, 0);
+			glVertex2f(0.9*rad, -0.1);
+			glEnd();
+		}
+
+		void drawCanon(float len) {
+
+			glBegin(GL_QUADS);
+			glVertex2f(-len / 2 , -len/2);
+			glVertex2f(len / 2, -len/2);
+			glVertex2f(len / 2, len / 2);
+			glVertex2f(-len / 2, len / 2);
+			glEnd();
+			glBegin(GL_QUADS);
+			glVertex2f(-len / 8 , len/2);
+			glVertex2f(len / 8, len/2);
+			glVertex2f(len / 8, 6*len/4);
+			glVertex2f(-len / 8 , 6*len/4);
+			glEnd();
+			glBegin(GL_QUADS);
+			glVertex2f(len / 2 , len/4);
+			glVertex2f(len / 2, -len/4);
+			glVertex2f(3*len /4, -len/4);
+			glVertex2f(3*len /4  , len/4);
+			glEnd();
+			glBegin(GL_QUADS);
+			glVertex2f(-len / 2 , len/4);
+			glVertex2f(-len / 2, -len/4);
+			glVertex2f(-3*len /4, -len/4);
+			glVertex2f(-3*len /4  , len/4);
+			glEnd();
+			glBegin(GL_QUADS);
+			glVertex2f(3*len / 4 , len/2);
+			glVertex2f(3*len / 4, -len/2);
+			glVertex2f(7*len / 8, -len/2);
+			glVertex2f(7*len / 8 , len/2);
+			glEnd();
+			glBegin(GL_QUADS);
+			glVertex2f(-3*len / 4 , len/2);
+			glVertex2f(-3*len / 4, -len/2);
+			glVertex2f(-7*len / 8, -len/2);
+			glVertex2f(-7*len / 8 , len/2);
+			glEnd();
+		}
+
+		void drawLaser(float len)
+		{
+			glBegin(GL_LINES);
+			glVertex2f(0.0f,3*len/4);
+			glVertex2f(0.0f, 1.75*len);
+			glEnd();
+
+		}
+
+		void drawSpider(float rad) {
+
+			glBegin(GL_TRIANGLE_FAN);
+			for(float i=45/2 ; i<383 ; i+=45) {
+				glVertex2f(rad * cos(DEG2RAD(i)), rad * sin(DEG2RAD(i)));
+			}
+			glEnd();
+			for(float i=45/2 ; i<381.5 ; i+=45) {
+				glBegin(GL_LINES);
+				glVertex2f(rad * cos(DEG2RAD(i)), rad * sin(DEG2RAD(i)));
+				glVertex2f((rad+rad) * cos(DEG2RAD(i)), (rad+rad) * sin(DEG2RAD(i)));
+				glEnd();
+				glBegin(GL_LINES);
+				if(i<175.5f)
+				{
+					glVertex2f((rad+rad) * cos(DEG2RAD(i)), (rad+rad) * sin(DEG2RAD(i)));
+					glVertex2f((rad+rad) * cos(DEG2RAD(i)),(rad+rad) * sin(DEG2RAD(i))+rad);
+				}
+				else
+				{
+					glVertex2f((rad+rad) * cos(DEG2RAD(i)), (rad+rad) * sin(DEG2RAD(i)));
+					glVertex2f((rad+rad) * cos(DEG2RAD(i)),(rad+rad) * sin(DEG2RAD(i))-rad);
+				}
+				glEnd();
+			}
+		}
+
+
+
+
+		// Initializing some openGL 3D rendering options
+		void initRendering() {
+
+			glEnable(GL_DEPTH_TEST);
+			glEnable(GL_LIGHTING);
+			glEnable(GL_LIGHT0);
+			glEnable(GL_NORMALIZE);
+			glEnable(GL_COLOR_MATERIAL);
+			//glClearColor(1.0f, 1.0f, 1.0f, 1.0f);   // Setting a background color
+
+			Image* image = loadBMP("vtr.bmp");
+			_textureId = loadTexture(image);
+			delete image;
+		}
+
+		// Function called when the window is resized
+		void handleResize(int w, int h) {
+
+			glViewport(0, 0, w, h);
+			glMatrixMode(GL_PROJECTION);
+			glLoadIdentity();
+			gluPerspective(45.0f, (float)w / (float)h, 0.1f, 200.0f);
+			glMatrixMode(GL_MODELVIEW);
+			glLoadIdentity();
+		}
+
+		void handleKeypress1(unsigned char key, int x, int y) {
+
+			if (key == 27 || key == 113) {
+			//	showScore();
+				system("xmms2 stop");
+				exit(0);     // escape key is pressed
+			}
+/*			if (key == 98) 	// b is pressed , time to highlight canon
+			{
+				red_selected_flag = 0;
+				green_selected_flag = 0;
+				canon_selected_flag = 1;
+
+			}
+			if (key == 114) 	// r is pressed , time to highlight red basket
+			{
+				red_selected_flag = 1;
+				green_selected_flag = 0;
+				canon_selected_flag = 0;
+			}
+			if (key == 103) 	// g is pressed , time to highlight green basket
+			{
+				red_selected_flag = 0;
+				green_selected_flag = 1;
+				canon_selected_flag = 0;
+
+			}*/
+			if (key == 32 && fire_flag == 0) 	// (space) is pressed , time to fire a bullet
+			{
+				fired();
+				fire++;
+				laser[fire-1].x = canon_x;
+				laser[fire-1].y = canon_y;
+				laser[fire-1].theta = theta;
+				laser[fire-1].deleted = 0;
+				oldTimeSinceStart = glutGet(GLUT_ELAPSED_TIME); //flag will be set to zero after 1 sec
+			}
+		}
+
+		void handleKeypress2(int key, int x, int y) {
+
+			int flag;
+			if (key == GLUT_KEY_LEFT)
+			{
+		/*		if(red_selected_flag == 1)
+				{
+					flag = 0;
+					for(i = 1; i<= num_of_spiders;i++)
+					{
+						if(spiders[i].deleted_flag == 0 && spiders[i].vel_y == 0)
+						{
+							if(spiders[i].x + 0.5 >= red_basket_x && spiders[i].x < red_basket_x) 
+								flag = 1;
+						}
+					}
+					if(flag == 0)
+						red_basket_x -= 0.1;
+
+				}
+
+				else if(green_selected_flag == 1)
+				{
+					flag = 0;
+					for(i = 1; i<= num_of_spiders;i++)
+					{
+						if(spiders[i].deleted_flag == 0 && spiders[i].vel_y == 0)
+						{
+							if(spiders[i].x + 0.5 >= green_basket_x && spiders[i].x < green_basket_x) 
+								flag = 1;
+						}
+					}
+					if(flag == 0)
+						green_basket_x -= 0.1;
+
+				}
+
+
+				else if(canon_selected_flag == 1)
+				{*/
+			/*		flag = 0;
+					for(i = 1; i<= num_of_spiders;i++)
+					{
+						if(spiders[i].deleted_flag == 0 && spiders[i].vel_y == 0)
+						{
+							if(spiders[i].x + 0.5 >= canon_x && spiders[i].x < canon_x) 
+								flag = 1;
+						}
+					}
+					if(flag == 0)
+			*/			canon_x -= 0.1;
+			//	}
+			}
+			if (key == GLUT_KEY_RIGHT)
+			{
+			/*	if(red_selected_flag == 1)
+				{
+					flag = 0;
+					for(i = 1; i<= num_of_spiders;i++)
+					{
+						if(spiders[i].deleted_flag == 0 && spiders[i].vel_y == 0)
+						{
+							if(spiders[i].x - 0.5 <= red_basket_x && spiders[i].x > red_basket_x) 
+								flag = 1;
+						}
+					}
+					if(flag == 0)
+						red_basket_x += 0.1;
+				}
+				else if(green_selected_flag == 1)
+				{
+					flag = 0;
+					for(i = 1; i<= num_of_spiders;i++)
+					{
+						if(spiders[i].deleted_flag == 0 && spiders[i].vel_y == 0)
+						{
+							if(spiders[i].x - 0.5 <= green_basket_x && spiders[i].x > green_basket_x) 
+								flag = 1;
+						}
+					}
+					if(flag == 0)
+						green_basket_x += 0.1;
+				}
+				else if(canon_selected_flag == 1)
+				{
+					flag = 0;
+					for(i = 1; i<= num_of_spiders;i++)
+					{
+						if(spiders[i].deleted_flag == 0 && spiders[i].vel_y == 0)
+						{
+							if(spiders[i].x - 0.5 <= canon_x && spiders[i].x > canon_x) 
+								flag = 1;
+						}
+					}
+					if(flag == 0)
+			*/			canon_x += 0.1;
+			//	}
+			}
+			if (key == GLUT_KEY_UP)
+			{
+					theta += 15;
+			}
+			if (key == GLUT_KEY_DOWN)
+			{
+					theta -= 15;
+			}
+		}
+
+		void handleMouseclick(int button, int state, int x, int y) {
+
+			/*  if (state == GLUT_DOWN)
+			    {
+			    if (button == GLUT_LEFT_BUTTON)
+			    theta += 15;
+			    else if (button == GLUT_RIGHT_BUTTON)
+			    theta -= 15;
+			    }
+			 */
+		}
